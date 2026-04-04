@@ -93,11 +93,11 @@ class MeetingDatabase {
 
   getMeetingByThread(threadId) {
     try {
-      const stmt = this.db.prepare(`
+      // Try exact match first
+      let stmt = this.db.prepare(`
         SELECT * FROM meetings WHERE thread_id = ? ORDER BY created_at DESC LIMIT 1
       `);
-
-      const meeting = stmt.get(threadId);
+      let meeting = stmt.get(threadId);
 
       if (meeting) {
         meeting.available_slots = JSON.parse(meeting.available_slots || "[]");
@@ -110,6 +110,48 @@ class MeetingDatabase {
     } catch (error) {
       logger.error("Failed to get meeting by thread", error);
       return null;
+    }
+  }
+
+  getMeetingByOrganizerEmail(organizerEmail, status = 'pending_selection') {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT * FROM meetings 
+        WHERE organizer_email = ? AND status = ?
+        ORDER BY created_at DESC 
+        LIMIT 1
+      `);
+
+      const meeting = stmt.get(organizerEmail, status);
+
+      if (meeting) {
+        meeting.available_slots = JSON.parse(meeting.available_slots || "[]");
+        meeting.selected_slot = meeting.selected_slot
+          ? JSON.parse(meeting.selected_slot)
+          : null;
+      }
+
+      return meeting;
+    } catch (error) {
+      logger.error("Failed to get meeting by organizer email", error);
+      return null;
+    }
+  }
+
+  updateMeetingSlotById(meetingId, selectedSlot) {
+    try {
+      const stmt = this.db.prepare(`
+        UPDATE meetings 
+        SET selected_slot = ?, status = 'confirmed', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `);
+
+      stmt.run(JSON.stringify(selectedSlot), meetingId);
+      logger.info(`Meeting slot updated for meeting ID: ${meetingId}`);
+      return true;
+    } catch (error) {
+      logger.error("Failed to update meeting slot", error);
+      return false;
     }
   }
 

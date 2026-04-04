@@ -100,11 +100,28 @@ const startEmailProcessor = () => {
         } else if (analysis.action === "select_slot") {
           logger.info("Slot selection detected");
 
+          const organizerEmail = from.match(/<([^>]+)>/)?.[1] || from;
           const threadId = inReplyTo || messageId;
-          const meeting = meetingDb.getMeetingByThread(threadId);
+          
+          // Try to find meeting by thread first, then by organizer email
+          let meeting = meetingDb.getMeetingByThread(threadId);
+          
+          if (!meeting) {
+            logger.info(`No meeting found by thread, trying organizer email: ${organizerEmail}`);
+            meeting = meetingDb.getMeetingByOrganizerEmail(organizerEmail);
+          }
 
           if (!meeting) {
-            logger.error("No meeting found for this thread");
+            logger.error("No meeting found for this thread or organizer");
+            
+            await outgoingQueue.add("send-reply", {
+              to: from,
+              subject: formatSubject(subject, true),
+              body: "I couldn't find a pending meeting request. Please start a new meeting request if needed.",
+              originalMessageId: messageId,
+              references: references,
+            });
+            
             return;
           }
 
@@ -127,9 +144,8 @@ const startEmailProcessor = () => {
             return;
           }
 
-          meetingDb.updateMeetingSlot(threadId, selectedSlot);
+          meetingDb.updateMeetingSlotById(meeting.id, selectedSlot);
 
-          const organizerEmail = from.match(/<([^>]+)>/)?.[1] || from;
           const organizerName = from.match(/^([^<]+)</)?.[1]?.trim() || null;
           const participants = meetingDb.getParticipants(meeting.id);
 
