@@ -30,6 +30,10 @@ class MeetingDatabase {
         name TEXT,
         email TEXT NOT NULL,
         timezone TEXT DEFAULT 'Asia/Kolkata',
+        priority INTEGER DEFAULT 0,
+        availability_start TEXT,
+        availability_end TEXT,
+        has_responded INTEGER DEFAULT 0,
         FOREIGN KEY (meeting_id) REFERENCES meetings (id)
       );
     `);
@@ -58,14 +62,14 @@ class MeetingDatabase {
     }
   }
 
-  addParticipant(meetingId, name, email, timezone = "Asia/Kolkata") {
+  addParticipant(meetingId, name, email, timezone = "Asia/Kolkata", priority = 0) {
     try {
       const stmt = this.db.prepare(`
-        INSERT INTO meeting_participants (meeting_id, name, email, timezone)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO meeting_participants (meeting_id, name, email, timezone, priority)
+        VALUES (?, ?, ?, ?, ?)
       `);
 
-      stmt.run(meetingId, name, email, timezone);
+      stmt.run(meetingId, name, email, timezone, priority);
       logger.info(`Participant ${email} added to meeting ${meetingId}`);
       return true;
     } catch (error) {
@@ -142,12 +146,12 @@ class MeetingDatabase {
     try {
       const stmt = this.db.prepare(`
         UPDATE meetings 
-        SET selected_slot = ?, status = 'confirmed', updated_at = CURRENT_TIMESTAMP
+        SET selected_slot = ?, status = 'awaiting_responses', updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `);
 
       stmt.run(JSON.stringify(selectedSlot), meetingId);
-      logger.info(`Meeting slot updated for meeting ID: ${meetingId}`);
+      logger.info(`Meeting slot updated for meeting ID: ${meetingId}, status: awaiting_responses`);
       return true;
     } catch (error) {
       logger.error("Failed to update meeting slot", error);
@@ -158,13 +162,72 @@ class MeetingDatabase {
   getParticipants(meetingId) {
     try {
       const stmt = this.db.prepare(`
-        SELECT * FROM meeting_participants WHERE meeting_id = ?
+        SELECT * FROM meeting_participants WHERE meeting_id = ? ORDER BY priority DESC
       `);
 
       return stmt.all(meetingId);
     } catch (error) {
       logger.error("Failed to get participants", error);
       return [];
+    }
+  }
+
+  updateParticipantAvailability(email, meetingId, startTime, endTime) {
+    try {
+      const stmt = this.db.prepare(`
+        UPDATE meeting_participants 
+        SET availability_start = ?, availability_end = ?, has_responded = 1
+        WHERE email = ? AND meeting_id = ?
+      `);
+
+      stmt.run(startTime, endTime, email, meetingId);
+      logger.info(`Availability updated for ${email}: ${startTime} - ${endTime}`);
+      return true;
+    } catch (error) {
+      logger.error("Failed to update participant availability", error);
+      return false;
+    }
+  }
+
+  getMeetingByParticipantEmail(email) {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT m.* FROM meetings m
+        JOIN meeting_participants p ON m.id = p.meeting_id
+        WHERE p.email = ? AND m.status = 'awaiting_responses' AND p.has_responded = 0
+        ORDER BY m.created_at DESC
+        LIMIT 1
+      `);
+
+      const meeting = stmt.get(email);
+
+      if (meeting) {
+        meeting.available_slots = JSON.parse(meeting.available_slots || "[]");
+        meeting.selected_slot = meeting.selected_slot
+          ? JSON.parse(meeting.selected_slot)
+          : null;
+      }
+
+      return meeting;
+    } catch (error) {
+      logger.error("Failed to get meeting by participant email", error);
+      return null;
+    }
+  }
+
+  checkAllParticipantsResponded(meetingId) {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT COUNT(*) as total, SUM(has_responded) as responded
+        FROM meeting_participants
+        WHERE meeting_id = ?
+      `);
+
+      const result = stmt.get(meetingId);
+      return result.total === result.responded;
+    } catch (error) {
+      logger.error("Failed to check participant responses", error);
+      return false;
     }
   }
 }

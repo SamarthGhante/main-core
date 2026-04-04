@@ -29,6 +29,10 @@ class EmailSender {
       }
 
       logger.success(`Email sent to ${to} (ID: ${data.id})`);
+      
+      // Add 1 second delay to respect rate limits (2 req/sec)
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
       return { success: true, id: data.id };
     } catch (error) {
       logger.error(`Failed to send email to ${to}`, error);
@@ -50,6 +54,10 @@ class EmailSender {
       }
 
       logger.success(`Email sent to ${to} (ID: ${data.id})`);
+      
+      // Add 1 second delay to respect rate limits (2 req/sec)
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
       return { success: true, id: data.id };
     } catch (error) {
       logger.error(`Failed to send email to ${to}`, error);

@@ -15,7 +15,7 @@ class AIService {
           {
             role: "system",
             content:
-              "You are a professional email assistant. Available tools: 'summarize_thread' for summaries, 'schedule_meeting' for meeting requests, 'select_slot' when user selects a time slot.",
+              "You are a professional email assistant. Available tools: 'summarize_thread' for summaries, 'schedule_meeting' for meeting requests, 'select_slot' when user selects a time slot, 'provide_availability' when someone provides their time availability.",
           },
           {
             role: "user",
@@ -58,6 +58,18 @@ class AIService {
               name: "select_slot",
               description:
                 "User is selecting a time slot from previously offered options.",
+              parameters: {
+                type: "object",
+                properties: {},
+              },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "provide_availability",
+              description:
+                "User is providing their time availability for a meeting date.",
               parameters: {
                 type: "object",
                 properties: {},

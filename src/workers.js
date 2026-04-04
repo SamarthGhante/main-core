@@ -32,6 +32,72 @@ const startEmailProcessor = () => {
       try {
         const analysis = await aiService.analyzeEmail(from, text);
 
+        // Check if this is from a participant in an awaiting meeting
+        const participantEmail = from.match(/<([^>]+)>/)?.[1] || from;
+        const participantMeeting = meetingDb.getMeetingByParticipantEmail(participantEmail);
+
+        if (participantMeeting) {
+          logger.info("Availability response from participant detected");
+          
+          const availability = meetingService.parseAvailabilityResponse(text);
+
+          if (availability) {
+            console.log(`\n${"-".repeat(50)}`);
+            console.log(`PARTICIPANT AVAILABILITY RECEIVED`);
+            console.log(`${"-".repeat(50)}`);
+            console.log(`From: ${from}`);
+            console.log(`Email: ${participantEmail}`);
+            console.log(`Available: ${availability.start_time} - ${availability.end_time}`);
+            console.log(`${"-".repeat(50)}\n`);
+
+            meetingDb.updateParticipantAvailability(
+              participantEmail,
+              participantMeeting.id,
+              availability.start_time,
+              availability.end_time
+            );
+
+            await outgoingQueue.add("send-reply", {
+              to: from,
+              subject: formatSubject(subject, true),
+              body: `Thank you! Your availability (${availability.start_time} - ${availability.end_time}) has been recorded.`,
+              originalMessageId: messageId,
+              references: references,
+            });
+
+            logger.info(`Availability recorded for ${participantEmail}`);
+
+            // Check if all participants have responded
+            const allResponded = meetingDb.checkAllParticipantsResponded(participantMeeting.id);
+
+            if (allResponded) {
+              logger.success("All participants have responded!");
+              const participants = meetingDb.getParticipants(participantMeeting.id);
+              meetingService.printParticipantData(participants, participantMeeting.selected_slot);
+            }
+          } else {
+            logger.info("Could not parse availability, printing raw response");
+            
+            console.log(`\n${"-".repeat(50)}`);
+            console.log(`PARTICIPANT RESPONSE (UNPARSED)`);
+            console.log(`${"-".repeat(50)}`);
+            console.log(`From: ${from}`);
+            console.log(`Email: ${participantEmail}`);
+            console.log(`Message: ${text}`);
+            console.log(`${"-".repeat(50)}\n`);
+
+            await outgoingQueue.add("send-reply", {
+              to: from,
+              subject: formatSubject(subject, true),
+              body: "I couldn't understand your availability. Please reply in format: 'Available from HH:MM to HH:MM' (e.g., 'Available from 09:00 to 11:00')",
+              originalMessageId: messageId,
+              references: references,
+            });
+          }
+          
+          return; // Exit early, this was a participant response
+        }
+
         if (analysis.action === "summarize_thread") {
           logger.info("Summary requested, fetching thread history");
 
@@ -77,7 +143,7 @@ const startEmailProcessor = () => {
           const participants = meetingService.extractParticipants(text);
           if (participants.length > 0) {
             participants.forEach((p) => {
-              meetingDb.addParticipant(meetingId, p.name, p.email, p.timezone);
+              meetingDb.addParticipant(meetingId, p.name, p.email, p.timezone, p.priority);
             });
             logger.info(`Added ${participants.length} participants to meeting`);
           }
@@ -149,7 +215,7 @@ const startEmailProcessor = () => {
           const organizerName = from.match(/^([^<]+)</)?.[1]?.trim() || null;
           const participants = meetingDb.getParticipants(meeting.id);
 
-          const confirmationMsg = `Thank you! Your meeting has been confirmed for ${selectedSlot.date} at ${selectedSlot.start_time} - ${selectedSlot.end_time}.`;
+          const confirmationMsg = `Thank you! Your meeting date has been selected for ${selectedSlot.date} (${selectedSlot.phase}).\n\nI'm now asking all participants for their availability on this date.`;
 
           await outgoingQueue.add("send-reply", {
             to: from,
@@ -162,22 +228,21 @@ const startEmailProcessor = () => {
           logger.info("Confirmation sent to organizer");
 
           if (participants.length > 0) {
-            const inviteMsg = meetingService.formatMeetingInvite(
+            const availabilityRequest = meetingService.formatAvailabilityRequest(
               selectedSlot,
-              organizerName,
-              participants
+              organizerName
             );
 
             for (const participant of participants) {
               await outgoingQueue.add("send-email", {
                 to: participant.email,
-                subject: `Meeting Invitation: ${subject.replace("Re: ", "")}`,
-                body: inviteMsg,
+                subject: `Availability Request: ${subject.replace("Re: ", "")}`,
+                body: availabilityRequest,
               });
             }
 
             logger.info(
-              `Meeting invites sent to ${participants.length} participants`
+              `Availability requests sent to ${participants.length} participants`
             );
           }
         }
