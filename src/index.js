@@ -1,5 +1,6 @@
 const logger = require("../utils/logger");
 const database = require("./database");
+const meetingDb = require("./meeting-database");
 const { startEmailProcessor, startEmailSender } = require("./workers");
 
 logger.startup("COEP Email Assistant Started");

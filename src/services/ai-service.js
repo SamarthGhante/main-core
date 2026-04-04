@@ -15,7 +15,7 @@ class AIService {
           {
             role: "system",
             content:
-              "You are a professional email assistant. If the user asks for a summary, call the 'summarize_thread' tool.",
+              "You are a professional email assistant. Available tools: 'summarize_thread' for summaries, 'schedule_meeting' for meeting requests, 'select_slot' when user selects a time slot.",
           },
           {
             role: "user",
@@ -35,15 +35,56 @@ class AIService {
               },
             },
           },
+          {
+            type: "function",
+            function: {
+              name: "schedule_meeting",
+              description:
+                "User is requesting to schedule a meeting. Fetch available calendar slots.",
+              parameters: {
+                type: "object",
+                properties: {
+                  duration: {
+                    type: "number",
+                    description: "Meeting duration in minutes (default: 60)",
+                  },
+                },
+              },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "select_slot",
+              description:
+                "User is selecting a time slot from previously offered options.",
+              parameters: {
+                type: "object",
+                properties: {},
+              },
+            },
+          },
         ],
       });
 
       const message = response.choices[0].message;
-      const needsSummary =
-        message.tool_calls?.[0]?.function?.name === "summarize_thread";
+      const toolCall = message.tool_calls?.[0];
+
+      if (toolCall) {
+        const functionName = toolCall.function.name;
+        const args = toolCall.function.arguments
+          ? JSON.parse(toolCall.function.arguments)
+          : {};
+
+        return {
+          action: functionName,
+          params: args,
+          response: message.content,
+        };
+      }
 
       return {
-        needsSummary,
+        action: "none",
         response: message.content,
       };
     } catch (error) {

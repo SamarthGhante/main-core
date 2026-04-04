@@ -9,15 +9,19 @@ main/
 ├── src/
 │   ├── index.js                    # Application entry point
 │   ├── database.js                 # Email storage and retrieval
+│   ├── meeting-database.js         # Meeting and participant storage
 │   ├── workers.js                  # Background job processors
 │   └── services/
 │       ├── ai-service.js          # AI-powered email analysis
-│       └── email-sender.js        # Email sending service
+│       ├── email-sender.js        # Email sending service
+│       └── meeting-service.js     # Meeting scheduling logic
 ├── utils/
 │   ├── config.js                  # Configuration management
 │   ├── logger.js                  # Professional logging utility
-│   └── email-utils.js             # Email formatting utilities
+│   ├── email-utils.js             # Email formatting utilities
+│   └── calendar-utils.js          # Google Calendar integration
 ├── package.json
+├── tokens.json                     # Google OAuth tokens
 └── .env
 ```
 
@@ -62,6 +66,27 @@ Professional logging system with timestamp formatting:
 - `logger.success()` - Success messages
 - `logger.startup()` - Startup banners
 
+### src/services/meeting-service.js
+Meeting scheduling service:
+- `getAvailableSlotsEmail()` - Fetch calendar slots and format message
+- `parseSlotSelection()` - Parse organizer's slot choice
+- `extractParticipants()` - Extract participant info from email
+- `formatMeetingInvite()` - Format meeting invitation
+
+### src/meeting-database.js
+Meeting and participant storage:
+- `createMeeting()` - Create new meeting request
+- `addParticipant()` - Add participant to meeting
+- `updateMeetingSlot()` - Save selected time slot
+- `getMeetingByThread()` - Retrieve meeting by email thread
+- `getParticipants()` - Get all participants for a meeting
+
+### utils/calendar-utils.js
+Google Calendar integration:
+- `getDatesAndPhases()` - Fetch available slots for next 3 days
+- Supports morning, afternoon, evening phases
+- Multi-timezone aware
+
 ### utils/email-utils.js
 Email formatting utilities:
 - `wrapMessageId()` - Format message IDs for email headers
@@ -78,12 +103,10 @@ Email formatting utilities:
 - **Error Handling**: Comprehensive error handling throughout
 - **Thread Support**: Proper email threading with References headers
 - **Database Persistence**: SQLite storage for email history
-
-## Running the Application
-
-```bash
-npm start
-```
+- **Meeting Scheduling**: Automated meeting scheduling with Google Calendar
+  - Automatic slot detection from organizer's calendar
+  - Multi-participant support with timezone handling
+  - Two-step workflow: slot selection → participant notification
 
 ## Environment Variables
 
@@ -91,3 +114,5 @@ Required in `.env` file:
 - `REDIS_HOST` - Redis server hostname
 - `GROQ_API_KEY` - Groq AI API key
 - `RESEND_API_KEY` - Resend email service API key
+- `CLIENT_ID` - Google OAuth client ID
+- `CLIENT_SECRET` - Google OAuth client secret
