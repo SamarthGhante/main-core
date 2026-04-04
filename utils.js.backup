@@ -1,0 +1,162 @@
+const { Worker, Queue } = require("bullmq");
+const { Groq } = require("groq-sdk");
+const { Resend } = require("resend");
+const Redis = require("ioredis");
+const Database = require("better-sqlite3");
+require("dotenv").config();
+
+const connection = {
+  host: process.env.REDIS_HOST || "redis-queue",
+  port: 6379,
+};
+const redisState = new Redis(connection);
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const resend = new Resend(process.env.RESEND_API_KEY);
+const db = new Database("emails.db");
+
+const outgoingQueue = new Queue("outgoing_emails", { connection });
+const getTS = () => `[${new Date().toLocaleTimeString()}]`;
+
+// Helper: Gmail REQUIRES angle brackets for threading headers
+const wrapId = (id) => {
+  if (!id) return null;
+  let clean = id.trim();
+  if (!clean.startsWith("<")) clean = "<" + clean;
+  if (!clean.endsWith(">")) clean = clean + ">";
+  return clean;
+};
+
+db.exec(`CREATE TABLE IF NOT EXISTS email_store (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id TEXT UNIQUE,
+    in_reply_to TEXT,
+    subject TEXT,
+    sender TEXT,
+    body TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+)`);
+
+const getThreadHistory = (messageId, inReplyTo) => {
+  const query = db.prepare(`
+    SELECT sender, body, timestamp FROM email_store 
+    WHERE message_id = ? OR in_reply_to = ? 
+    OR in_reply_to = (SELECT in_reply_to FROM email_store WHERE message_id = ? AND in_reply_to IS NOT NULL)
+    OR message_id = (SELECT in_reply_to FROM email_store WHERE message_id = ?)
+    ORDER BY timestamp ASC
+  `);
+  return query.all(inReplyTo, messageId, messageId, messageId);
+};
+
+const pop_emails = () => {
+  console.log(`${getTS()} 🤖 AI Processor Online...`);
+
+  new Worker(
+    "incoming-emails",
+    async (job) => {
+      const { subject, from, text, messageId, inReplyTo, references } =
+        job.data;
+
+      db.prepare(
+        `INSERT OR IGNORE INTO email_store (message_id, in_reply_to, subject, sender, body) VALUES (?, ?, ?, ?, ?)`,
+      ).run(messageId, inReplyTo, subject, from, text);
+
+      console.log(`\n${getTS()} 📬 Processing: ${subject}`);
+
+      try {
+        const response = await groq.chat.completions.create({
+          model: "openai/gpt-oss-120b",
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are an assistant. If the user asks for a summary, call the 'summarize_thread' tool.",
+            },
+            { role: "user", content: `From: ${from}\nContent: ${text}` },
+          ],
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "summarize_thread",
+                description: "Gets history from DB and generates a summary.",
+                parameters: { type: "object", properties: {} },
+              },
+            },
+          ],
+        });
+
+        const msg = response.choices[0].message;
+
+        if (msg.tool_calls?.[0].function.name === "summarize_thread") {
+          console.log(`${getTS()} 🔍 Fetching thread history...`);
+          const history = getThreadHistory(messageId, inReplyTo);
+          const historyText = history
+            .map((m) => `[${m.timestamp}] ${m.sender}: ${m.body}`)
+            .join("\n---\n");
+
+          const summaryRsp = await groq.chat.completions.create({
+            model: "openai/gpt-oss-120b",
+            messages: [
+              { role: "system", content: "Summarize this thread concisely." },
+              { role: "user", content: historyText },
+            ],
+          });
+
+          const summary = summaryRsp.choices[0].message.content;
+          console.log(
+            `\n${getTS()} 📝 TERMINAL SUMMARY:\n${"=".repeat(40)}\n${summary}\n${"=".repeat(40)}`,
+          );
+
+          // Queue with fixed threading headers
+          await outgoingQueue.add("send-email", {
+            to: from,
+            subject: subject.startsWith("Re:") ? subject : `Re: ${subject}`,
+            body: summary,
+            originalMessageId: wrapId(messageId),
+            references: references, // Keep raw, we'll format in mailer
+          });
+        }
+      } catch (err) {
+        console.error(`${getTS()} ❌ Worker Error:`, err.message);
+      }
+    },
+    { connection },
+  );
+};
+
+const start_mailer = () => {
+  new Worker(
+    "outgoing_emails",
+    async (job) => {
+      const { to, subject, body, originalMessageId, references } = job.data;
+      try {
+        // Build the References chain properly
+        const cleanRefs = references
+          ? references.split(/\s+/).map(wrapId).join(" ")
+          : "";
+        const finalReferences = `${cleanRefs} ${originalMessageId}`.trim();
+
+        const { data, error } = await resend.emails.send({
+          from: "Assistant <ass1@nptel.pp.ua>",
+          to: [to],
+          subject: subject,
+          text: body,
+          headers: {
+            "In-Reply-To": originalMessageId,
+            References: finalReferences,
+          },
+        });
+
+        if (error) throw new Error(error.message);
+        console.log(
+          `${getTS()} 📤 Threaded reply sent (Resend ID: ${data.id})`,
+        );
+      } catch (err) {
+        console.error(`${getTS()} ❌ Mailer Error:`, err.message);
+      }
+    },
+    { connection },
+  );
+};
+
+module.exports = { pop_emails, start_mailer };
