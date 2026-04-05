@@ -7,6 +7,8 @@
     "dev": "node --watch src/index.js",
     "migrate": "node migrate-database.js",
     "migrate:subject": "node migrate-subject.js",
+    "migrate:calendar": "node migrate-calendar.js",
+    "migrate:all": "node migrate-database.js && node migrate-subject.js && node migrate-calendar.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

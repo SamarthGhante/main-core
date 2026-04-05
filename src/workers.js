@@ -8,6 +8,7 @@ const aiService = require("./services/ai-service");
 const emailSender = require("./services/email-sender");
 const meetingService = require("./services/meeting-service");
 const slotCalculator = require("./services/slot-calculator");
+const { scheduleMeeting } = require("../utils/scheduler-utils");
 const { formatSubject, formatThreadHistory } = require("../utils/email-utils");
 
 const connection = {
@@ -91,21 +92,154 @@ const startEmailProcessor = () => {
 
               slotCalculator.printSlotsToTerminal(topSlots, participants, selectedDate);
 
-              // Send optimal slots to organizer
-              const slotsMessage = slotCalculator.formatSlotsForEmail(topSlots, participants);
+              if (topSlots.length === 0) {
+                logger.error("No suitable time slots found for all participants");
+                
+                await outgoingQueue.add("send-email", {
+                  to: organizerEmail,
+                  subject: `Re: ${meeting.subject || 'Meeting Schedule'}`,
+                  body: "Unfortunately, no suitable time slots could be found that work for the majority of participants. Please try selecting a different date.",
+                });
+                
+                return;
+              }
 
-              // Use subject from meeting, or fallback to generic
-              const emailSubject = meeting.subject 
-                ? `Re: ${meeting.subject.replace(/^Re:\s*/i, '')}` 
-                : 'Optimal Meeting Times';
+              // ============================================================
+              // AUTO-SELECT BEST SLOT AND CREATE CALENDAR EVENT
+              // ============================================================
+              
+              const bestSlot = topSlots[0];
+              logger.info(`Selected best slot: ${bestSlot.start.toISO()}`);
 
-              await outgoingQueue.add("send-email", {
-                to: organizerEmail,
-                subject: emailSubject,
-                body: slotsMessage,
-              });
+              try {
+                // Extract time components from DateTime object
+                const startTime = bestSlot.start.toFormat('HH:mm');
+                const endTime = bestSlot.end.toFormat('HH:mm');
+                const date = bestSlot.start.toISODate();
 
-              logger.success("Optimal slots sent to organizer");
+                // Collect all participant emails
+                const participantEmails = participants.map(p => p.email);
+
+                // Create calendar event
+                logger.info("Creating Google Calendar event...");
+                const calendarResult = await scheduleMeeting(
+                  date,
+                  startTime,
+                  endTime,
+                  {
+                    title: meeting.subject || "Meeting",
+                    description: `Meeting scheduled by AI Assistant\n\nParticipants: ${participants.map(p => p.name).join(", ")}`,
+                    participants: participantEmails,
+                    timezone: organizerEmail.includes("@") ? "UTC" : "Asia/Kolkata",
+                  }
+                );
+
+                logger.success("Calendar event created successfully");
+                logger.info(`Event ID: ${calendarResult.event_id}`);
+                logger.info(`Meet Link: ${calendarResult.meet_link}`);
+
+                // ============================================================
+                // SEND CONFIRMATIONS TO PARTICIPANTS
+                // ============================================================
+
+                logger.info("Sending confirmation emails to participants...");
+
+                for (const participant of participants) {
+                  const confirmationEmail = meetingService.formatParticipantConfirmation(
+                    participant,
+                    {
+                      date: date,
+                      start_time: startTime,
+                      end_time: endTime,
+                    },
+                    calendarResult.meet_link,
+                    calendarResult.calendar_link,
+                    meeting.subject || "Meeting"
+                  );
+
+                  await outgoingQueue.add("send-email", {
+                    to: participant.email,
+                    subject: `Re: ${meeting.subject || 'Meeting'} - Confirmed!`,
+                    body: confirmationEmail,
+                  });
+
+                  // 1 second delay between emails (Resend rate limit)
+                  await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+
+                logger.success(`Confirmation emails sent to ${participants.length} participants`);
+
+                // ============================================================
+                // SEND DETAILED EXPLANATION TO ORGANIZER
+                // ============================================================
+
+                logger.info("Sending detailed explanation to organizer...");
+
+                const organizerExplanation = meetingService.formatOrganizerExplanation(
+                  topSlots,
+                  {
+                    date: date,
+                    start_time: startTime,
+                    end_time: endTime,
+                    score: bestSlot.score,
+                  },
+                  participants,
+                  calendarResult.meet_link,
+                  calendarResult.calendar_link,
+                  meeting.subject || "Meeting"
+                );
+
+                await outgoingQueue.add("send-email", {
+                  to: organizerEmail,
+                  subject: `Meeting Confirmed: ${meeting.subject || 'Meeting'}`,
+                  body: organizerExplanation,
+                });
+
+                logger.success("Organizer explanation sent");
+
+                // ============================================================
+                // UPDATE MEETING STATUS
+                // ============================================================
+
+                logger.info("Updating meeting status to confirmed...");
+
+                // Update meeting with event details
+                meetingDb.db.prepare(`
+                  UPDATE meetings 
+                  SET status = 'confirmed', 
+                      event_id = ?,
+                      meet_link = ?,
+                      updated_at = CURRENT_TIMESTAMP
+                  WHERE id = ?
+                `).run(calendarResult.event_id, calendarResult.meet_link, meeting.id);
+
+                logger.success("Meeting status updated to confirmed");
+
+                // ============================================================
+                // PRINT SUMMARY
+                // ============================================================
+
+                console.log(`\n${"=".repeat(70)}`);
+                console.log("MEETING SUCCESSFULLY CREATED AND SCHEDULED");
+                console.log(`${"=".repeat(70)}`);
+                console.log(`\nEvent ID: ${calendarResult.event_id}`);
+                console.log(`Meet Link: ${calendarResult.meet_link}`);
+                console.log(`Calendar Link: ${calendarResult.calendar_link}`);
+                console.log(`Date: ${date} at ${startTime} UTC`);
+                console.log(`Participants: ${participants.map(p => `${p.name} (${p.timezone})`).join(", ")}`);
+                console.log(`\n${"=".repeat(70)}\n`);
+
+              } catch (error) {
+                logger.error("Failed to create calendar event", error);
+                logger.error(error.message);
+
+                // Send error notification to organizer
+                await outgoingQueue.add("send-email", {
+                  to: organizerEmail,
+                  subject: `Meeting Scheduling Error - ${meeting.subject || 'Meeting'}`,
+                  body: `Unfortunately, the calendar event could not be created automatically.\n\nError: ${error.message}\n\nBest slot selected:\n${bestSlot.start.toISO()}\n\nPlease create the event manually or contact support.`,
+                });
+              }
             }
           } else {
             logger.info("Could not parse availability, printing raw response");

@@ -183,6 +183,86 @@ class MeetingService {
     
     console.log(`\n${"=".repeat(70)}\n`);
   }
+
+  // Format confirmation email for participants
+  formatParticipantConfirmation(participant, selectedSlot, meetLink, calendarLink, meetingTitle) {
+    const { DateTime } = require('luxon');
+    
+    const slotTime = DateTime.fromISO(`${selectedSlot.date}T${selectedSlot.start_time}`, { zone: 'UTC' });
+    const localTime = slotTime.setZone(participant.timezone);
+    
+    return `Hello ${participant.name},
+
+The meeting "${meetingTitle}" has been scheduled!
+
+Meeting Details:
+- Date: ${selectedSlot.date}
+- Time: ${localTime.toFormat('HH:mm')} (${participant.timezone})
+- Duration: 1 hour
+
+Your availability and priority were considered in selecting this time slot.
+
+Google Meet Link: ${meetLink || 'Will be sent separately'}
+Calendar Event: ${calendarLink || 'Check your Google Calendar'}
+
+This meeting has been automatically added to your Google Calendar.
+
+Thank you!`;
+  }
+
+  // Format detailed explanation email for organizer
+  formatOrganizerExplanation(allSlots, selectedSlot, participants, meetLink, calendarLink, meetingTitle) {
+    const { DateTime } = require('luxon');
+    
+    let message = `Meeting Scheduled: ${meetingTitle}\n\n`;
+    message += `${"=".repeat(70)}\n\n`;
+    message += `The optimal meeting time has been automatically selected and scheduled.\n\n`;
+    
+    // Show selected slot
+    message += `SELECTED SLOT:\n`;
+    message += `${"-".repeat(70)}\n`;
+    const slotTime = DateTime.fromISO(`${selectedSlot.date}T${selectedSlot.start_time}`, { zone: 'UTC' });
+    message += `Date: ${selectedSlot.date}\n`;
+    message += `Score: ${selectedSlot.score.toFixed(1)} (highest)\n\n`;
+    
+    message += `Time for each participant:\n`;
+    participants.forEach(p => {
+      const localTime = slotTime.setZone(p.timezone);
+      const available = selectedSlot.availability_status?.[p.email] || 'Unknown';
+      message += `  • ${p.name} (${p.timezone}): ${localTime.toFormat('HH:mm')} - ${available}\n`;
+    });
+    
+    message += `\nGoogle Meet Link: ${meetLink}\n`;
+    message += `Calendar Event: ${calendarLink}\n\n`;
+    
+    // Show all considered slots
+    if (allSlots.length > 1) {
+      message += `${"-".repeat(70)}\n`;
+      message += `OTHER OPTIONS CONSIDERED:\n\n`;
+      
+      allSlots.slice(1).forEach((slot, idx) => {
+        const otherTime = DateTime.fromISO(`${slot.date}T${slot.start_time}`, { zone: 'UTC' });
+        message += `Option ${idx + 2}: Score ${slot.score.toFixed(1)}\n`;
+        participants.forEach(p => {
+          const localTime = otherTime.setZone(p.timezone);
+          message += `  • ${p.name}: ${localTime.toFormat('HH:mm')}\n`;
+        });
+        message += `\n`;
+      });
+    }
+    
+    message += `${"-".repeat(70)}\n`;
+    message += `WHY THIS SLOT WAS CHOSEN:\n\n`;
+    message += `The selected slot had the highest score (${selectedSlot.score.toFixed(1)}) based on:\n`;
+    message += `  • Participant availability overlap\n`;
+    message += `  • Priority weighting (higher priority = more influence)\n`;
+    message += `  • Time-of-day preferences (business hours preferred)\n`;
+    message += `  • Timezone fairness (reasonable local times for all)\n\n`;
+    
+    message += `All participants have been notified and the meeting is on their calendars.\n`;
+    
+    return message;
+  }
 }
 
 module.exports = new MeetingService();

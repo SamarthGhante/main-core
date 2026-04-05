@@ -21,6 +21,8 @@ class MeetingDatabase {
         available_slots TEXT,
         selected_slot TEXT,
         participants TEXT,
+        event_id TEXT,
+        meet_link TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
