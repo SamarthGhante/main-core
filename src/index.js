@@ -3,12 +3,12 @@ const database = require("./database");
 const meetingDb = require("./meeting-database");
 const { startEmailProcessor, startEmailSender } = require("./workers");
 
-logger.startup("COEP Email Assistant Started");
+logger.startup("Astra Email Assistant");
 
 startEmailProcessor();
 startEmailSender();
 
-logger.info("All workers are running");
+logger.info("System is up and running");
 
 process.on("SIGINT", () => {
   logger.info("Shutting down gracefully");

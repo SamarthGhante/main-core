@@ -52,6 +52,20 @@ class MeetingService {
       <p style="margin: 0; color: ${EMAIL_THEME.darkGray}; font-size: 14px;">${text}</p>
     </div>`;
   }
+  // Plain text version for terminal display
+  formatAvailableSlotsPlainText(slots) {
+    if (!slots || slots.length === 0) {
+      return "Unfortunately, no available slots were found in the next 3 days. Please check your calendar and try again.";
+    }
+
+    let text = "Available Meeting Slots:\n\n";
+    slots.forEach((slot, index) => {
+      text += `${index + 1}. ${slot.date} (${slot.phase}) - ${slot.start_time} to ${slot.end_time}\n`;
+    });
+    text += `\nReply with the option number (e.g., "1" or "Option 2")`;
+    return text;
+  }
+
   formatAvailableSlots(slots) {
     if (!slots || slots.length === 0) {
       const noSlots = "<p style=\"margin: 0; color: ${EMAIL_THEME.softGray};\">Unfortunately, no available slots were found in the next 3 days. Please check your calendar and try again.</p>";
@@ -89,13 +103,16 @@ class MeetingService {
       return {
         slots,
         message: this.formatAvailableSlots(slots),
+        plainText: this.formatAvailableSlotsPlainText(slots),
       };
     } catch (error) {
       logger.error("Failed to get available slots", error);
       return {
         slots: [],
-        message:
-          "I encountered an error while checking the calendar. Please try again later.",
+        message: this.emailHeader() + 
+          this.emailSection("Error", "<p>I encountered an error while checking the calendar. Please try again later.</p>") +
+          this.emailFooter(),
+        plainText: "I encountered an error while checking the calendar. Please try again later.",
       };
     }
   }
@@ -285,16 +302,33 @@ class MeetingService {
     
     let content = `<p style="margin: 0 0 16px 0;">Your meeting has been automatically scheduled using optimal time analysis.</p>`;
     
-    // Selected slot section
-    const slotTime = DateTime.fromISO(`${selectedSlot.date}T${selectedSlot.start_time}`, { zone: 'UTC' });
-    const endTime = slotTime.plus({ hours: 1 });
+    // Selected slot section - safely parse DateTime
+    let slotTime, endTime;
+    try {
+      // Try to create a valid ISO string: YYYY-MM-DDTHH:mm:ss
+      const isoString = `${selectedSlot.date}T${selectedSlot.start_time}:00`;
+      slotTime = DateTime.fromISO(isoString, { zone: 'UTC' });
+      if (!slotTime.isValid) {
+        throw new Error(`Invalid time: ${isoString}`);
+      }
+      endTime = slotTime.plus({ hours: 1 });
+    } catch (err) {
+      logger.error("DateTime parsing error in organizer explanation", err);
+      // Fallback: use date string directly
+      slotTime = DateTime.fromISO(selectedSlot.date, { zone: 'UTC' });
+      endTime = slotTime;
+    }
     
-    let selectedContent = `<strong>Date:</strong> ${selectedSlot.date}<br><strong>Time:</strong> ${slotTime.toISO()}<br><strong>Score:</strong> ${selectedSlot.score.toFixed(1)} (highest)<br><br>`;
+    let selectedContent = `<strong>Date:</strong> ${selectedSlot.date}<br><strong>Time:</strong> ${slotTime.isValid ? slotTime.toISO() : 'N/A'}<br><strong>Score:</strong> ${selectedSlot.score.toFixed(1)} (highest)<br><br>`;
     selectedContent += `<strong>Local Times:</strong><br>`;
     participants.forEach(p => {
-      const localTime = slotTime.setZone(p.timezone);
-      const localEnd = endTime.setZone(p.timezone);
-      selectedContent += `${p.name}: ${localTime.toFormat('HH:mm')} – ${localEnd.toFormat('HH:mm')} (${p.timezone})<br>`;
+      if (slotTime.isValid) {
+        const localTime = slotTime.setZone(p.timezone);
+        const localEnd = endTime.setZone(p.timezone);
+        selectedContent += `${p.name}: ${localTime.toFormat('HH:mm')} – ${localEnd.toFormat('HH:mm')} (${p.timezone})<br>`;
+      } else {
+        selectedContent += `${p.name}: Time unavailable (${p.timezone})<br>`;
+      }
     });
     
     content += this.emailHighlight(selectedContent);
@@ -324,12 +358,20 @@ class MeetingService {
       content += `<p style="margin: 16px 0 8px 0; font-weight: 600; color: ${EMAIL_THEME.primaryBlue}; font-size: 15px;">Other Options Considered</p>`;
       content += `<table style="width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 13px;">`;
       allSlots.slice(1).forEach((slot, idx) => {
-        const otherTime = DateTime.fromISO(`${slot.date}T${slot.start_time}`, { zone: 'UTC' });
-        const bgColor = idx % 2 === 0 ? "#FFFFFF" : EMAIL_THEME.lightBlue;
-        content += `<tr style="background-color: ${bgColor}; border-bottom: 1px solid ${EMAIL_THEME.borderGray};">
-          <td style="padding: 8px; font-weight: 600; color: ${EMAIL_THEME.softGray}; width: 40px;">Option ${idx + 2}</td>
-          <td style="padding: 8px; color: ${EMAIL_THEME.darkGray};">Score: ${slot.score.toFixed(1)} • ${participants.map(p => `${p.name}: ${otherTime.setZone(p.timezone).toFormat('HH:mm')}`).join(' • ')}</td>
-        </tr>`;
+        try {
+          const isoString = `${slot.date}T${slot.start_time}:00`;
+          const otherTime = DateTime.fromISO(isoString, { zone: 'UTC' });
+          const bgColor = idx % 2 === 0 ? "#FFFFFF" : EMAIL_THEME.lightBlue;
+          
+          if (otherTime.isValid) {
+            content += `<tr style="background-color: ${bgColor}; border-bottom: 1px solid ${EMAIL_THEME.borderGray};">
+              <td style="padding: 8px; font-weight: 600; color: ${EMAIL_THEME.softGray}; width: 40px;">Option ${idx + 2}</td>
+              <td style="padding: 8px; color: ${EMAIL_THEME.darkGray};">Score: ${slot.score.toFixed(1)} • ${participants.map(p => `${p.name}: ${otherTime.setZone(p.timezone).toFormat('HH:mm')}`).join(' • ')}</td>
+            </tr>`;
+          }
+        } catch (err) {
+          logger.error(`Error parsing slot time for option ${idx + 2}`, err);
+        }
       });
       content += `</table>`;
     }

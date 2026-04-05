@@ -292,7 +292,7 @@ const startEmailProcessor = () => {
           logger.info("Meeting scheduling requested");
 
           const duration = analysis.params?.duration || 60;
-          const { slots, message } =
+          const { slots, message, plainText } =
             await meetingService.getAvailableSlotsEmail(duration);
 
           const threadId = inReplyTo || messageId;
@@ -318,7 +318,7 @@ const startEmailProcessor = () => {
           console.log(`\n${"-".repeat(50)}`);
           console.log("AVAILABLE MEETING SLOTS:");
           console.log(`${"-".repeat(50)}`);
-          console.log(message);
+          console.log(plainText);
           console.log(`${"-".repeat(50)}\n`);
 
           await outgoingQueue.add("send-reply", {

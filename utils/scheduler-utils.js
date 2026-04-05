@@ -5,7 +5,7 @@ const fs = require("fs");
 
 const TOKEN_PATH = "tokens.json";
 
-// 🔐 AUTH (FIXED + NORMALIZATION)
+// authentication
 async function authenticate() {
   const raw = JSON.parse(fs.readFileSync(TOKEN_PATH));
 
@@ -15,7 +15,7 @@ async function authenticate() {
     "http://localhost"
   );
 
-  // 🔥 normalize Python token → Google format
+  // normalization
   const creds = {
     access_token: raw.token || raw.access_token,
     refresh_token: raw.refresh_token,
@@ -30,7 +30,7 @@ async function authenticate() {
   return google.calendar({ version: "v3", auth });
 }
 
-// 🚀 MAIN
+// Entry point
 async function scheduleMeeting(date, start_time, end_time, meetingData = {}) {
   const calendar = await authenticate();
 
@@ -75,7 +75,7 @@ async function scheduleMeeting(date, start_time, end_time, meetingData = {}) {
   };
 }
 
-// ▶️ RUN DIRECTLY
+// Demo Run
 if (require.main === module) {
   (async () => {
     try {
@@ -87,7 +87,7 @@ if (require.main === module) {
         "11:00",
         {
           title: "Standalone Test Meeting",
-          participants: ["your-email@gmail.com"], // change this
+          participants: ["your-email@gmail.com"], 
         }
       );
 
