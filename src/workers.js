@@ -7,6 +7,7 @@ const meetingDb = require("./meeting-database");
 const aiService = require("./services/ai-service");
 const emailSender = require("./services/email-sender");
 const meetingService = require("./services/meeting-service");
+const slotCalculator = require("./services/slot-calculator");
 const { formatSubject, formatThreadHistory } = require("../utils/email-utils");
 
 const connection = {
@@ -74,6 +75,37 @@ const startEmailProcessor = () => {
               logger.success("All participants have responded!");
               const participants = meetingDb.getParticipants(participantMeeting.id);
               meetingService.printParticipantData(participants, participantMeeting.selected_slot);
+
+              // Calculate optimal time slots
+              logger.info("Calculating optimal meeting times...");
+              
+              const meeting = meetingDb.getMeetingByThread(participantMeeting.thread_id);
+              const organizerEmail = meeting.organizer_email;
+              const selectedDate = participantMeeting.selected_slot.date;
+
+              const topSlots = slotCalculator.generateTopSlots(
+                participants,
+                organizerEmail,
+                selectedDate
+              );
+
+              slotCalculator.printSlotsToTerminal(topSlots, participants, selectedDate);
+
+              // Send optimal slots to organizer
+              const slotsMessage = slotCalculator.formatSlotsForEmail(topSlots, participants);
+
+              // Use subject from meeting, or fallback to generic
+              const emailSubject = meeting.subject 
+                ? `Re: ${meeting.subject.replace(/^Re:\s*/i, '')}` 
+                : 'Optimal Meeting Times';
+
+              await outgoingQueue.add("send-email", {
+                to: organizerEmail,
+                subject: emailSubject,
+                body: slotsMessage,
+              });
+
+              logger.success("Optimal slots sent to organizer");
             }
           } else {
             logger.info("Could not parse availability, printing raw response");
@@ -137,7 +169,8 @@ const startEmailProcessor = () => {
             threadId,
             organizerEmail,
             organizerName,
-            slots
+            slots,
+            subject  // Add subject here
           );
 
           const participants = meetingService.extractParticipants(text);

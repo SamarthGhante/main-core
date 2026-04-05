@@ -70,8 +70,19 @@ Professional logging system with timestamp formatting:
 Meeting scheduling service:
 - `getAvailableSlotsEmail()` - Fetch calendar slots and format message
 - `parseSlotSelection()` - Parse organizer's slot choice
-- `extractParticipants()` - Extract participant info from email
-- `formatMeetingInvite()` - Format meeting invitation
+- `extractParticipants()` - Extract participant info from email (with priority)
+- `formatAvailabilityRequest()` - Format availability request email
+- `parseAvailabilityResponse()` - Parse participant time windows
+- `printParticipantData()` - Display all participant data to terminal
+
+### src/services/slot-calculator.js
+Smart meeting time calculator:
+- `generateTopSlots()` - Calculate optimal slots based on availability and priority
+- `formatSlotsForEmail()` - Format calculated slots for email
+- `printSlotsToTerminal()` - Display slots with detailed breakdown
+- Multi-timezone normalization using Luxon
+- Priority-weighted scoring algorithm
+- Conflict resolution with hard constraints
 
 ### src/meeting-database.js
 Meeting and participant storage:
@@ -96,17 +107,72 @@ Email formatting utilities:
 
 ## Features
 
-- **Modular Architecture**: Clean separation of concerns
-- **Professional Logging**: Clear, timestamped logs without emoji spam
-- **Plain Text Summaries**: Simple, readable email summaries
-- **Separate Functions**: Distinct email sending and response functions
-- **Error Handling**: Comprehensive error handling throughout
-- **Thread Support**: Proper email threading with References headers
-- **Database Persistence**: SQLite storage for email history
-- **Meeting Scheduling**: Automated meeting scheduling with Google Calendar
-  - Automatic slot detection from organizer's calendar
+- ✅ **Modular Architecture**: Clean separation of concerns
+- ✅ **Professional Logging**: Clear, timestamped logs without emoji spam
+- ✅ **Plain Text Summaries**: Simple, readable email summaries
+- ✅ **Separate Functions**: Distinct email sending and response functions
+- ✅ **Error Handling**: Comprehensive error handling throughout
+- ✅ **Thread Support**: Proper email threading with References headers
+- ✅ **Database Persistence**: SQLite storage for email history
+- ✅ **Rate Limiting**: 1-second delays between emails (Resend 2 req/sec compliance)
+- ✅ **Meeting Scheduling**: Automated multi-step meeting scheduling
+  - Google Calendar integration for organizer availability
   - Multi-participant support with timezone handling
-  - Two-step workflow: slot selection → participant notification
+  - Priority-based participant weighting
+  - Smart slot calculation with conflict resolution
+  - Multi-timezone normalization
+  - Availability collection workflow
+
+## Usage
+
+### Start the Application
+
+```bash
+npm start
+```
+
+The system will:
+1. Poll emails every 60 seconds
+2. Process new emails with AI analysis
+3. Generate and send responses automatically
+4. Handle meeting scheduling workflow
+5. Send daily summaries at configured time
+
+### Manual Commands
+
+```bash
+# Development mode with auto-restart
+npm run dev
+
+# Run database migration (add new columns to existing database)
+npm run migrate
+```
+
+### Meeting Scheduling Workflow
+
+When an email mentions a meeting:
+
+**Step 1**: System fetches organizer's Google Calendar availability
+**Step 2**: Sends available slots to organizer
+**Step 3**: Organizer selects a date from email reply
+**Step 4**: System asks participants for availability on that date
+**Step 5**: Participants reply with time windows (e.g., "09:00 to 11:00")
+**Step 6**: System calculates optimal meeting times using smart algorithm
+**Step 7**: Sends top 3 options to organizer (timezone-aware, priority-weighted)
+
+**Participant Format in Email:**
+```
+Participants:
+Name, email@example.com, Timezone, Priority
+John Doe, john@example.com, Asia/Kolkata, 5
+Jane Smith, jane@example.com, America/New_York, 3
+Bob Wilson, bob@example.com, Europe/London, 2
+```
+
+Priority: 1-10 (higher = more influence on final time selection)
+
+See [MEETING_GUIDE.md](./MEETING_GUIDE.md) for detailed meeting workflow.
+See [SLOT_ALGORITHM.md](./SLOT_ALGORITHM.md) for smart algorithm details.
 
 ## Environment Variables
 

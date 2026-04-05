@@ -16,6 +16,7 @@ class MeetingDatabase {
         thread_id TEXT NOT NULL,
         organizer_email TEXT NOT NULL,
         organizer_name TEXT,
+        subject TEXT,
         status TEXT DEFAULT 'pending_selection',
         available_slots TEXT,
         selected_slot TEXT,
@@ -40,17 +41,18 @@ class MeetingDatabase {
     logger.info("Meeting database schema initialized");
   }
 
-  createMeeting(threadId, organizerEmail, organizerName, availableSlots) {
+  createMeeting(threadId, organizerEmail, organizerName, availableSlots, subject = null) {
     try {
       const stmt = this.db.prepare(`
-        INSERT INTO meetings (thread_id, organizer_email, organizer_name, available_slots, status)
-        VALUES (?, ?, ?, ?, 'pending_selection')
+        INSERT INTO meetings (thread_id, organizer_email, organizer_name, subject, available_slots, status)
+        VALUES (?, ?, ?, ?, ?, 'pending_selection')
       `);
 
       const result = stmt.run(
         threadId,
         organizerEmail,
         organizerName,
+        subject,
         JSON.stringify(availableSlots)
       );
 
