@@ -17,7 +17,7 @@ class EmailSender {
         from: config.resend.from,
         to: [to],
         subject: subject,
-        text: body,
+        html: body,
         headers: {
           "In-Reply-To": wrappedId,
           References: finalReferences,
@@ -46,7 +46,7 @@ class EmailSender {
         from: config.resend.from,
         to: [to],
         subject: subject,
-        text: body,
+        html: body,
       });
 
       if (error) {
